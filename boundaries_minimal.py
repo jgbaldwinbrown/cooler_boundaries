@@ -138,6 +138,7 @@ def plot_with_boundaries(insulation_table, region, data, resolution, norm, windo
 	format_ticks(ins_ax, y=False, rotate=False)
 	ax.set_xlim(region[1], region[2])
 	plt.savefig("chr_with_boundaries.png")
+	return boundaries, weak_boundaries, strong_boundaries
 
 def make_histkwargs():
 	histkwargs = dict(
@@ -146,27 +147,6 @@ def make_histkwargs():
 		lw=2,
 	)
 	return histkwargs
-
-def boundary_strength_and_plot(insulation_table, windows, histkwargs):
-	f, axs = plt.subplots(len(windows),1, sharex=True, figsize=(6,6), constrained_layout=True)
-	for i, (w, ax) in enumerate(zip(windows, axs)):
-		ax.hist(
-			insulation_table[f'boundary_strength_{w}'],
-			**histkwargs
-		)
-		ax.text(0.02, 0.9,
-				 f'Window {w//1000}kb',
-				 ha='left',
-				 va='top',
-				 transform=ax.transAxes)
-
-		ax.set(
-			xscale='log',
-			ylabel='# boundaries'
-		)
-
-	axs[-1].set(xlabel='Boundary strength');
-	plt.savefig("boundary_strength.png")
 
 def call_boundaries(insulation_table, windows, histkwargs):
 	f, axs = plt.subplots(len(windows), 1, sharex=True, figsize=(6,6), constrained_layout=True)
@@ -208,11 +188,7 @@ def call_boundaries(insulation_table, windows, histkwargs):
 
 	axs[-1].set(xlabel='Boundary strength')
 	plt.savefig("boundaries.png")
-	return thresholds_li, thresholds_otsu
-
-def get_ctcf_data(data_dir):
-	ctcf_fc_file = cooltools.download_data("HFF_CTCF_fc", cache=True, data_dir=data_dir)
-	return ctcf_fc_file
+	return thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu
 
 def tabulate_boundaries(insulation_table, windows):
 	is_boundary = np.any([
@@ -223,110 +199,37 @@ def tabulate_boundaries(insulation_table, windows):
 	# boundaries.head()
 	return boundaries
 
-def chip_signal(boundaries, data_dir):
-	# Calculate the average ChIP singal/input in the 3kb region around the boundary.
-	flank = 1000 # Length of flank to one side from the boundary, in basepairs
-	ctcf_chip_signal = bbi.stackup(
-		data_dir+'/test_CTCF.bigWig',
-		boundaries.chrom,
-		boundaries.start-flank,
-		boundaries.end+flank,
-		bins=1).flatten()
-	return ctcf_chip_signal
+def write_thresh(path, threshes):
+	with open(path, "w") as fp:
+		fp.write(str(threshes))
 
-def plot_boundary_strength_vs_ctcf_enrich(boundaries, windows, ctcf_chip_signal, thresholds_li, thresholds_otsu):
-	w=windows[0]
-	f, ax = plt.subplots()
-	ax.loglog(
-		boundaries[f'boundary_strength_{w}'],
-		ctcf_chip_signal,
-		'o',
-		markersize=1,
-		alpha=0.05
-	);
-	ax.set(
-		xlim=(1e-4,1e1),
-		ylim=(3e-2,3e1),
-		xlabel='Boundary strength',
-		ylabel='CTCF enrichment over input')
+def write_nbound(path, nb):
+	with open(path, "w") as fp:
+		fp.write(str(nb))
 
-	ax.axvline(thresholds_otsu[w], ls='--', color='magenta', label='Otsu threshold')
-	ax.axvline(thresholds_li[w], ls='--', color='green', label='Li threshold')
-	ax.legend()
-	plt.savefig("boundaries_vs_ctcf.png")
-
-def threshold_and_plot_boundaries_with_ctcf(boundaries, ctcf_chip_signal, histkwargs, windows):
-	f, ax = plt.subplots()
-	ax.set(xscale='log', xlabel='Boundary strength')
-	ax.hist(
-		boundaries[f'boundary_strength_{windows[0]}'][ctcf_chip_signal>=2],
-		label='CTCF Chip/Input ≥ 2.0',
-		**histkwargs
-	);
-	ax.hist(
-		boundaries[f'boundary_strength_{windows[0]}'][ctcf_chip_signal<2],
-		label='CTCF Chip/Input < 2.0',
-		**histkwargs
-	);
-	ax.hist(
-		boundaries[f'boundary_strength_{windows[0]}'],
-		label='all boundaries',
-		**histkwargs
-	);
-	ax.legend(loc='upper left')
-	plt.savefig("ctcf_boundaries.png")
-
-def pileup_1d_select_boundaries(insulation_table, windows, thresholds_otsu):
-	# Select the strict thresholded boundaries for one window size
-	top_boundaries = insulation_table[insulation_table[f'boundary_strength_{windows[1]}']>=thresholds_otsu[windows[1]]]
-	return top_boundaries
-
-def pileup_1d_create_stackup(data_dir, top_boundaries, resolution):
-	# Create of the stackup, the flanks are +- 50 Kb, number of bins is 100 :
-	flank = 50000 # Length of flank to one side from the boundary, in basepairs
-	nbins = 100   # Number of bins to split the region
-	stackup = bbi.stackup(data_dir+'/test_CTCF.bigWig',
-						  top_boundaries.chrom,
-						  top_boundaries.start+resolution//2-flank,
-						  top_boundaries.start+resolution//2+flank,
-						  bins=nbins)
-	return stackup, flank, nbins
-
-def pileup_1d_plot(stackup, flank, nbins):
-	f, ax = plt.subplots(figsize=[7,5])
-	ax.plot(np.nanmean(stackup, axis=0) )
-	ax.set(xticks=np.arange(0, nbins+1, 10),
-		   xticklabels=(np.arange(0, nbins+1, 10)-nbins//2)*flank*2/nbins/1000,
-		   xlabel='Distance from boundary, kbp',
-		   ylabel='CTCF ChIP-Seq mean fold change over input');
-	plt.savefig("pileup.png")
+def write_bound(path, b):
+	b.to_csv(path, sep = '\t', index = False)
+	# with open(path, "w") as fp:
+	# 	fp.write(str(b))
 
 def main():
-	print("hi")
 	data_dir, resolution, clr, windows, insulation_table, norm = getdata()
 	print_first_summary(windows, insulation_table)
 
 	region = makeregion("chr2", 10_500_000, windows)
 	data = data_from_clr(clr, region)
 
-	plot_contacts_simple(windows, resolution, data, insulation_table, region, norm)
-	plot_with_boundaries(insulation_table, region, data, resolution, norm, windows)
+	boundaries, weak_boundaries, strong_boundaries = plot_with_boundaries(insulation_table, region, data, resolution, norm, windows)
+	write_bound("boundaries.txt", boundaries)
+	write_bound("weak_boundaries.txt", weak_boundaries)
+	write_bound("strong_boundaries.txt", strong_boundaries)
 
-	histkwargs = make_histkwargs()
-	boundary_strength_and_plot(insulation_table, windows, histkwargs)
-	thresholds_li, thresholds_otsu = call_boundaries(insulation_table, windows, histkwargs)
-
-	ctcf_fc_file = get_ctcf_data(data_dir)
-
-	boundaries = tabulate_boundaries(insulation_table, windows)
-	ctcf_chip_signal = chip_signal(boundaries, data_dir)
-	plot_boundary_strength_vs_ctcf_enrich(boundaries, windows, ctcf_chip_signal, thresholds_li, thresholds_otsu)
-	threshold_and_plot_boundaries_with_ctcf(boundaries, ctcf_chip_signal, histkwargs, windows)
-
-	top_boundaries = pileup_1d_select_boundaries(insulation_table, windows, thresholds_otsu)
-	stackup, flank, nbins = pileup_1d_create_stackup(data_dir, top_boundaries, resolution)
-	pileup_1d_plot(stackup, flank, nbins)
-
+	thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu = call_boundaries(insulation_table, windows, make_histkwargs())
+	tabulate_boundaries(insulation_table, windows)
+	write_thresh("thresholds_li.txt", thresholds_li)
+	write_thresh("thresholds_otsu.txt", thresholds_otsu)
+	write_nbound("n_boundaries_li.txt", n_boundaries_li)
+	write_nbound("n_boundaries_otsu.txt", n_boundaries_otsu)
 
 if __name__ == "__main__":
 	main()
