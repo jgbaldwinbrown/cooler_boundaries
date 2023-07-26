@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"sync"
 	"io"
 	"strings"
@@ -67,9 +66,8 @@ func SetCmdIo(cmd *exec.Cmd) {
 	cmd.Stderr = os.Stderr
 }
 
-func Cload(ctx context.Context, a Args, threads int) error {
-	cmd := exec.CommandContext(
-		ctx,
+func Cload(a Args, threads int) error {
+	cmd := exec.Command(
 		"cooler", "cload", "pairs",
 		"-c1", "2",
 		"-p1", "3",
@@ -86,9 +84,8 @@ func Cload(ctx context.Context, a Args, threads int) error {
 	return nil
 }
 
-func Balance(ctx context.Context, a Args, threads int) error {
-	cmd := exec.CommandContext(
-		ctx,
+func Balance(a Args, threads int) error {
+	cmd := exec.Command(
 		"cooler", "balance",
 		"-p", fmt.Sprintf("%d", threads),
 		fmt.Sprintf("%s.%d.cool", a.Outpre, a.Binsize),
@@ -100,9 +97,8 @@ func Balance(ctx context.Context, a Args, threads int) error {
 	return nil
 }
 
-func Zoom(ctx context.Context, a Args, threads int) error {
-	cmd := exec.CommandContext(
-		ctx,
+func Zoom(a Args, threads int) error {
+	cmd := exec.Command(
 		"cooler", "zoomify",
 		"-p", fmt.Sprintf("%d", threads),
 		"-r", "1000,10000,100000,1000000,10000000,100000000",
@@ -115,7 +111,7 @@ func Zoom(ctx context.Context, a Args, threads int) error {
 	return nil
 }
 
-func Boundaries(ctx context.Context, a Args, threads int) error {
+func Boundaries(a Args, threads int) error {
 	mcool := strings.ReplaceAll(
 		fmt.Sprintf("%s.%d.cool", a.Outpre, a.Binsize),
 		".cool", ".mcool",
@@ -129,7 +125,7 @@ func Boundaries(ctx context.Context, a Args, threads int) error {
 		cmdargs = append(cmdargs, fmt.Sprintf("%s:%d", region.Chr, region.Start))
 	}
 
-	cmd := exec.CommandContext(ctx, "boundaries_flexible.py", cmdargs...)
+	cmd := exec.Command( "boundaries_flexible.py", cmdargs...)
 	SetCmdIo(cmd)
 
 	e := cmd.Run()
@@ -137,35 +133,35 @@ func Boundaries(ctx context.Context, a Args, threads int) error {
 	return nil
 }
 
-func Plot(ctx context.Context, a Args, threads int) error {
+func Plot(a Args, threads int) error {
 	return nil
 }
 
-func RunArg(ctx context.Context, a Args, f Flags) error {
+func RunArg(a Args, f Flags) error {
 	h := func(e error) error { return fmt.Errorf("RunArg: %w", e) }
 
 	if !f.SkipCload {
-		e := Cload(ctx, a, f.Threads)
+		e := Cload(a, f.Threads)
 		if e != nil { return h(e) }
 	}
 
 	if !f.SkipBalance {
-		e := Balance(ctx, a, f.Threads)
+		e := Balance(a, f.Threads)
 		if e != nil { return h(e) }
 	}
 
 	if !f.SkipZoom {
-		e := Zoom(ctx, a, f.Threads)
+		e := Zoom(a, f.Threads)
 		if e != nil { return h(e) }
 	}
 
 	if !f.SkipBoundaries {
-		e := Boundaries(ctx, a, f.Threads)
+		e := Boundaries(a, f.Threads)
 		if e != nil { return h(e) }
 	}
 
 	if !f.SkipPlot {
-		e := Plot(ctx, a, f.Threads)
+		e := Plot(a, f.Threads)
 		if e != nil { return h(e) }
 	}
 
@@ -173,31 +169,17 @@ func RunArg(ctx context.Context, a Args, f Flags) error {
 }
 
 type Prunner struct {
-	Jobs chan func(context.Context)
+	Jobs chan func()
 	Wg sync.WaitGroup
-	Ctx context.Context
-	Cancel context.CancelFunc
-	CloseOnce sync.Once
 }
 
-func NewPrunner(threads int, ctx context.Context) (*Prunner) {
+func NewPrunner(threads int) *Prunner {
 	p := new(Prunner)
-	p.Ctx, p.Cancel = context.WithCancel(ctx)
-	p.Jobs = make(chan func(context.Context))
-
+	p.Jobs = make(chan func())
 	for i := 0; i < threads; i++ {
 		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Println("recovering")
-					p.Close()
-					p.Cancel()
-					fmt.Println("canceled")
-					p.Wg.Done()
-				}
-			}()
 			for job := range p.Jobs {
-				job(p.Ctx)
+				job()
 				p.Wg.Done()
 			}
 		}()
@@ -205,7 +187,7 @@ func NewPrunner(threads int, ctx context.Context) (*Prunner) {
 	return p
 }
 
-func (p *Prunner) Run(f func(context.Context)) {
+func (p *Prunner) Run(f func()) {
 	p.Wg.Add(1)
 	p.Jobs <- f
 }
@@ -215,9 +197,7 @@ func (p *Prunner) Wait() {
 }
 
 func (p *Prunner) Close() {
-	p.CloseOnce.Do(func() {
-		close(p.Jobs)
-	})
+	close(p.Jobs)
 }
 
 func main() {
@@ -227,11 +207,11 @@ func main() {
 	args, e := GetArgs(os.Stdin)
 	if e != nil { panic(e) }
 
-	p := NewPrunner(flags.Threads, context.Background())
+	p := NewPrunner(flags.Threads)
 	for _, arg := range args {
 		arg := arg
-		p.Run(func(ctx context.Context) {
-			e := RunArg(ctx, arg, flags)
+		p.Run(func() {
+			e := RunArg(arg, flags)
 			if e != nil { panic(e) }
 		})
 		fmt.Println(arg)
