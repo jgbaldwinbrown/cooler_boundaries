@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import sys
+import re
+
 # import standard python libraries
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,17 +28,13 @@ import bioframe
 from skimage.filters import threshold_li, threshold_otsu
 import bbi
 
-def getdata():
-	data_dir = './data/'
-	cool_file = cooltools.download_data("HFF_MicroC", cache=True, data_dir=data_dir)
-
-	resolution = 10000
-	clr = cooler.Cooler(f'{data_dir}test.mcool::resolutions/{resolution}')
+def getdata(path, resolution):
+	clr = cooler.Cooler(f'{path}::resolutions/{resolution}')
 	windows = [3*resolution, 5*resolution, 10*resolution, 25*resolution]
 	insulation_table = insulation(clr, windows, verbose=True)
 
 	norm = LogNorm(vmax=0.1, vmin=0.001)
-	return data_dir, resolution, clr, windows, insulation_table, norm
+	return clr, windows, insulation_table, norm
 
 def print_first_summary(windows, insulation_table):
 	first_window_summary =insulation_table.columns[[ str(windows[-1]) in i for i in insulation_table.columns]]
@@ -72,41 +71,7 @@ def makeregion(chr, start, windows):
 	end = start + 90 * windows[0]
 	return (chr, start, end)
 
-def plot_contacts_simple(windows, resolution, data, insulation_table, region, norm):
-	plt.rcParams['font.size'] = 12
-
-	f, ax = plt.subplots(figsize=(18, 6))
-	im = pcolormesh_45deg(ax, data, start=region[1], resolution=resolution, norm=norm, cmap='fall')
-	ax.set_aspect(0.5)
-	ax.set_ylim(0, 10*windows[0])
-	format_ticks(ax, rotate=False)
-	ax.xaxis.set_visible(False)
-
-	divider = make_axes_locatable(ax)
-	cax = divider.append_axes("right", size="1%", pad=0.1, aspect=6)
-	plt.colorbar(im, cax=cax)
-
-	insul_region = bioframe.select(insulation_table, region)
-
-	ins_ax = divider.append_axes("bottom", size="50%", pad=0., sharex=ax)
-	ins_ax.set_prop_cycle(plt.cycler("color", plt.cm.plasma(np.linspace(0,1,5))))
-	ins_ax.plot(insul_region[['start', 'end']].mean(axis=1),
-				insul_region['log2_insulation_score_'+str(windows[0])],
-				label=f'Window {windows[0]} bp')
-
-	ins_ax.legend(bbox_to_anchor=(0., -1), loc='lower left', ncol=4);
-
-	format_ticks(ins_ax, y=False, rotate=False)
-	ax.set_xlim(region[1], region[2])
-	plt.savefig("fig1.png")
-
-	for res in windows[1:]:
-		ins_ax.plot(insul_region[['start', 'end']].mean(axis=1), insul_region[f'log2_insulation_score_{res}'], label=f'Window {res} bp')
-	ins_ax.legend(bbox_to_anchor=(0., -1), loc='lower left', ncol=4);
-	# f
-	plt.savefig("fig2.png")
-
-def plot_with_boundaries(insulation_table, region, data, resolution, norm, windows):
+def plot_with_boundaries(insulation_table, region, data, resolution, norm, windows, outpre):
 	f, ax = plt.subplots(figsize=(20, 10))
 	im = pcolormesh_45deg(ax, data, start=region[1], resolution=resolution, norm=norm, cmap='fall')
 	ax.set_aspect(0.5)
@@ -137,7 +102,7 @@ def plot_with_boundaries(insulation_table, region, data, resolution, norm, windo
 
 	format_ticks(ins_ax, y=False, rotate=False)
 	ax.set_xlim(region[1], region[2])
-	plt.savefig("chr_with_boundaries.png")
+	plt.savefig(f"{outpre}_chr_with_boundaries.png")
 	return boundaries, weak_boundaries, strong_boundaries
 
 def make_histkwargs():
@@ -148,7 +113,7 @@ def make_histkwargs():
 	)
 	return histkwargs
 
-def call_boundaries(insulation_table, windows, histkwargs):
+def call_boundaries(insulation_table, windows, histkwargs, outpre):
 	f, axs = plt.subplots(len(windows), 1, sharex=True, figsize=(6,6), constrained_layout=True)
 	thresholds_li = {}
 	thresholds_otsu = {}
@@ -158,6 +123,9 @@ def call_boundaries(insulation_table, windows, histkwargs):
 			**histkwargs
 		)
 		thresholds_li[w] = threshold_li(insulation_table[f'boundary_strength_{w}'].dropna().values)
+		print(insulation_table)
+		vals = insulation_table[f'boundary_strength_{w}'].dropna().values
+		print(vals)
 		thresholds_otsu[w] = threshold_otsu(insulation_table[f'boundary_strength_{w}'].dropna().values)
 		n_boundaries_li = (insulation_table[f'boundary_strength_{w}'].dropna()>=thresholds_li[w]).sum()
 		n_boundaries_otsu = (insulation_table[f'boundary_strength_{w}'].dropna()>=thresholds_otsu[w]).sum()
@@ -187,7 +155,7 @@ def call_boundaries(insulation_table, windows, histkwargs):
 		)
 
 	axs[-1].set(xlabel='Boundary strength')
-	plt.savefig("boundaries.png")
+	plt.savefig(f"{outpre}_boundaries.png")
 	return thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu
 
 def tabulate_boundaries(insulation_table, windows):
@@ -196,7 +164,6 @@ def tabulate_boundaries(insulation_table, windows):
 			for w in windows],
 		axis=0)
 	boundaries = insulation_table[is_boundary]
-	# boundaries.head()
 	return boundaries
 
 def write_thresh(path, threshes):
@@ -209,27 +176,35 @@ def write_nbound(path, nb):
 
 def write_bound(path, b):
 	b.to_csv(path, sep = '\t', index = False)
-	# with open(path, "w") as fp:
-	# 	fp.write(str(b))
+
+def parse_region(regstr):
+	fields = regstr.split(":")
+	return fields[0], int(fields[1])
 
 def main():
-	data_dir, resolution, clr, windows, insulation_table, norm = getdata()
+	path = sys.argv[1]
+	outpre = sys.argv[2]
+	regionstr = sys.argv[3]
+	region_chrom, region_pos = parse_region(regionstr)
+	resolution = 1000
+	clr, windows, insulation_table, norm = getdata(path, resolution)
 	print_first_summary(windows, insulation_table)
 
-	region = makeregion("chr2", 10_500_000, windows)
+	# region = makeregion("chr2", 10_500_000, windows)
+	region = makeregion(region_chrom, region_pos, windows)
 	data = data_from_clr(clr, region)
 
-	boundaries, weak_boundaries, strong_boundaries = plot_with_boundaries(insulation_table, region, data, resolution, norm, windows)
-	write_bound("boundaries.txt", boundaries)
-	write_bound("weak_boundaries.txt", weak_boundaries)
-	write_bound("strong_boundaries.txt", strong_boundaries)
+	boundaries, weak_boundaries, strong_boundaries = plot_with_boundaries(insulation_table, region, data, resolution, norm, windows, outpre)
+	write_bound(f"{outpre}_boundaries.txt", boundaries)
+	write_bound(f"{outpre}_weak_boundaries.txt", weak_boundaries)
+	write_bound(f"{outpre}_strong_boundaries.txt", strong_boundaries)
 
-	thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu = call_boundaries(insulation_table, windows, make_histkwargs())
+	thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu = call_boundaries(insulation_table, windows, make_histkwargs(), outpre)
 	tabulate_boundaries(insulation_table, windows)
-	write_thresh("thresholds_li.txt", thresholds_li)
-	write_thresh("thresholds_otsu.txt", thresholds_otsu)
-	write_nbound("n_boundaries_li.txt", n_boundaries_li)
-	write_nbound("n_boundaries_otsu.txt", n_boundaries_otsu)
+	write_thresh(f"{outpre}_thresholds_li.txt", thresholds_li)
+	write_thresh(f"{outpre}_thresholds_otsu.txt", thresholds_otsu)
+	write_nbound(f"{outpre}_n_boundaries_li.txt", n_boundaries_li)
+	write_nbound(f"{outpre}_n_boundaries_otsu.txt", n_boundaries_otsu)
 
 if __name__ == "__main__":
 	main()
