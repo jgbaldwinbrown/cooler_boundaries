@@ -1,0 +1,7 @@
+{
+	"PairsPath": "/home/jgbaldwinbrown/Documents/work_stuff/drosophila/homologous_hybrid_mispairing/hic/arima_full/analysis/3_lifted/cooler/boundaries/v2/../../../rehead/ixw_to_ixwref_rehead_downsampled.pairs.gz",
+	"ChrSizesPath": "ixw_biggest.fa.gz.chrlens.txt",
+	"Outpre": "ixw_to_ixwref_1kb.cool",
+	"Binsize": 1000,
+	"Regions": [ {"Chr": "3R_ISO1", "Start": 10000000} ]
+}
