@@ -1,8 +1,8 @@
 package main
 
 import (
+	"golang.org/x/sync/errgroup"
 	"context"
-	"sync"
 	"io"
 	"strings"
 	"fmt"
@@ -172,54 +172,6 @@ func RunArg(ctx context.Context, a Args, f Flags) error {
 	return nil
 }
 
-type Prunner struct {
-	Jobs chan func(context.Context)
-	Wg sync.WaitGroup
-	Ctx context.Context
-	Cancel context.CancelFunc
-	CloseOnce sync.Once
-}
-
-func NewPrunner(threads int, ctx context.Context) (*Prunner) {
-	p := new(Prunner)
-	p.Ctx, p.Cancel = context.WithCancel(ctx)
-	p.Jobs = make(chan func(context.Context))
-
-	for i := 0; i < threads; i++ {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Println("recovering")
-					p.Close()
-					p.Cancel()
-					fmt.Println("canceled")
-					p.Wg.Done()
-				}
-			}()
-			for job := range p.Jobs {
-				job(p.Ctx)
-				p.Wg.Done()
-			}
-		}()
-	}
-	return p
-}
-
-func (p *Prunner) Run(f func(context.Context)) {
-	p.Wg.Add(1)
-	p.Jobs <- f
-}
-
-func (p *Prunner) Wait() {
-	p.Wg.Wait()
-}
-
-func (p *Prunner) Close() {
-	p.CloseOnce.Do(func() {
-		close(p.Jobs)
-	})
-}
-
 func main() {
 	flags, e := GetFlags()
 	if e != nil { panic(e) }
@@ -227,15 +179,20 @@ func main() {
 	args, e := GetArgs(os.Stdin)
 	if e != nil { panic(e) }
 
-	p := NewPrunner(flags.Threads, context.Background())
+	eg, ctx := errgroup.WithContext(context.Background())
+	eg.SetLimit(flags.Threads)
+
 	for _, arg := range args {
 		arg := arg
-		p.Run(func(ctx context.Context) {
+		eg.Go(func() error {
 			e := RunArg(ctx, arg, flags)
-			if e != nil { panic(e) }
+			if e != nil { return e }
+			return nil
 		})
 		fmt.Println(arg)
 	}
-	p.Close()
-	p.Wait()
+	e = eg.Wait()
+	if e != nil {
+		panic(e)
+	}
 }
