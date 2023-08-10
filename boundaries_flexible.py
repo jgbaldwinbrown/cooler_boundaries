@@ -105,6 +105,44 @@ def plot_with_boundaries(insulation_table, region, data, resolution, norm, windo
 	plt.savefig(f"{outpre}_chr_with_boundaries.png")
 	return boundaries, weak_boundaries, strong_boundaries
 
+def plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, norm, window, outpre):
+	f, ax = plt.subplots(figsize=(20, 10))
+	im = pcolormesh_45deg(ax, data, start=region[1], resolution=resolution, norm=norm, cmap='fall')
+	ax.set_aspect(0.5)
+	ax.set_ylim(0, 10*window)
+	format_ticks(ax, rotate=False)
+	ax.xaxis.set_visible(False)
+
+	divider = make_axes_locatable(ax)
+	cax = divider.append_axes("right", size="1%", pad=0.1, aspect=6)
+	plt.colorbar(im, cax=cax)
+
+	insul_region = bioframe.select(insulation_table, region)
+
+	ins_ax = divider.append_axes("bottom", size="50%", pad=0., sharex=ax)
+
+	ins_ax.plot(insul_region[['start', 'end']].mean(axis=1),
+				insul_region[f'log2_insulation_score_{window}'], label=f'Window {window} bp')
+
+	boundaries = insul_region[~np.isnan(insul_region[f'boundary_strength_{window}'])]
+	weak_boundaries = boundaries[~boundaries[f'is_boundary_{window}']]
+	strong_boundaries = boundaries[boundaries[f'is_boundary_{window}']]
+	ins_ax.scatter(weak_boundaries[['start', 'end']].mean(axis=1),
+				weak_boundaries[f'log2_insulation_score_{window}'], label='Weak boundaries')
+	ins_ax.scatter(strong_boundaries[['start', 'end']].mean(axis=1),
+				strong_boundaries[f'log2_insulation_score_{window}'], label='Strong boundaries')
+
+	ins_ax.legend(bbox_to_anchor=(0., -1), loc='lower left', ncol=4);
+
+	format_ticks(ins_ax, y=False, rotate=False)
+	ax.set_xlim(region[1], region[2])
+	plt.savefig(f"{outpre}_chr_with_boundaries_window_{window}.png")
+	return boundaries, weak_boundaries, strong_boundaries
+
+def plot_with_boundaries_all_winsizes(insulation_table, region, data, resolution, norm, windows, outpre):
+	for window in windows:
+		plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, norm, window, outpre)
+
 def make_histkwargs():
 	histkwargs = dict(
 		bins=10**np.linspace(-4,1,200),
@@ -194,7 +232,7 @@ def main():
 	region = makeregion(region_chrom, region_pos, windows)
 	data = data_from_clr(clr, region)
 
-	boundaries, weak_boundaries, strong_boundaries = plot_with_boundaries(insulation_table, region, data, resolution, norm, windows, outpre)
+	boundaries, weak_boundaries, strong_boundaries = plot_with_boundaries_all_winsizes(insulation_table, region, data, resolution, norm, windows, outpre)
 	write_bound(f"{outpre}_boundaries.txt", boundaries)
 	write_bound(f"{outpre}_weak_boundaries.txt", weak_boundaries)
 	write_bound(f"{outpre}_strong_boundaries.txt", strong_boundaries)
