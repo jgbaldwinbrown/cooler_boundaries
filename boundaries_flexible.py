@@ -105,7 +105,16 @@ def plot_with_boundaries(insulation_table, region, data, resolution, norm, windo
 	plt.savefig(f"{outpre}_chr_with_boundaries.png")
 	return boundaries, weak_boundaries, strong_boundaries
 
-def plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, norm, window, outpre):
+def get_boundaries_fixed_win(insulation_table, region):
+	insul_region = bioframe.select(insulation_table, region)
+
+	boundaries = insul_region[~np.isnan(insul_region[f'boundary_strength_{window}'])]
+	weak_boundaries = boundaries[~boundaries[f'is_boundary_{window}']]
+	strong_boundaries = boundaries[boundaries[f'is_boundary_{window}']]
+
+	return boundaries, weak_boundaries, strong_boundaries
+
+def plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, norm, window, outpre, boundaries, weak_boundaries, strong_boundaries):
 	f, ax = plt.subplots(figsize=(20, 10))
 	im = pcolormesh_45deg(ax, data, start=region[1], resolution=resolution, norm=norm, cmap='fall')
 	ax.set_aspect(0.5)
@@ -124,9 +133,6 @@ def plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, n
 	ins_ax.plot(insul_region[['start', 'end']].mean(axis=1),
 				insul_region[f'log2_insulation_score_{window}'], label=f'Window {window} bp')
 
-	boundaries = insul_region[~np.isnan(insul_region[f'boundary_strength_{window}'])]
-	weak_boundaries = boundaries[~boundaries[f'is_boundary_{window}']]
-	strong_boundaries = boundaries[boundaries[f'is_boundary_{window}']]
 	ins_ax.scatter(weak_boundaries[['start', 'end']].mean(axis=1),
 				weak_boundaries[f'log2_insulation_score_{window}'], label='Weak boundaries')
 	ins_ax.scatter(strong_boundaries[['start', 'end']].mean(axis=1),
@@ -215,6 +221,12 @@ def write_nbound(path, nb):
 def write_bound(path, b):
 	b.to_csv(path, sep = '\t', index = False)
 
+def split_multiregionstr(multiregionstr):
+	out = multiregionstr.split(";")
+	if len(out) > 0 and out[-1] == "":
+		out = out[:-1]
+	return out
+
 def parse_region(regstr):
 	fields = regstr.split(":")
 	return fields[0], int(fields[1])
@@ -222,20 +234,26 @@ def parse_region(regstr):
 def main():
 	path = sys.argv[1]
 	outpre = sys.argv[2]
-	regionstr = sys.argv[3]
-	region_chrom, region_pos = parse_region(regionstr)
+	multiregionstr = sys.argv[3]
+
+	regionstrs = split_multiregionstr(multiregionstr)
+
 	resolution = 1000
 	clr, windows, insulation_table, norm = getdata(path, resolution)
 	print_first_summary(windows, insulation_table)
 
 	# region = makeregion("chr2", 10_500_000, windows)
-	region = makeregion(region_chrom, region_pos, windows)
-	data = data_from_clr(clr, region)
+	for regionstr in regionstrs:
+		region_chrom, region_pos = parse_region(regionstr)
+		region = makeregion(region_chrom, region_pos, windows)
+		data = data_from_clr(clr, region)
+		routpre = outpre + "_" + regionstr
 
-	boundaries, weak_boundaries, strong_boundaries = plot_with_boundaries_all_winsizes(insulation_table, region, data, resolution, norm, windows, outpre)
-	write_bound(f"{outpre}_boundaries.txt", boundaries)
-	write_bound(f"{outpre}_weak_boundaries.txt", weak_boundaries)
-	write_bound(f"{outpre}_strong_boundaries.txt", strong_boundaries)
+		boundaries, weak_boundaries, strong_boundaries = get_boundaries_fixed_win(insulation_table, region)
+		plot_with_boundaries_all_winsizes(insulation_table, region, data, resolution, norm, windows, routpre, boundaries, weak_boundaries, strong_boundaries)
+		write_bound(f"{routpre}_boundaries.txt", boundaries)
+		write_bound(f"{routpre}_weak_boundaries.txt", weak_boundaries)
+		write_bound(f"{routpre}_strong_boundaries.txt", strong_boundaries)
 
 	thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu = call_boundaries(insulation_table, windows, make_histkwargs(), outpre)
 	tabulate_boundaries(insulation_table, windows)
