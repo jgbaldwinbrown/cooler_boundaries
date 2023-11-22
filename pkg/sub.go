@@ -66,7 +66,7 @@ func ParseLine(line []string, col map[string]int) (GenoSpan, float64, bool, erro
 		return h(e)
 	}
 
-	ins, e := strconv.ParseFloat(line[col["log2_insulation_score_10000"]], 64)
+	ins, e := strconv.ParseFloat(line[col["log2_insulation_score_100000"]], 64)
 	if e != nil {
 		return h(e)
 	}
