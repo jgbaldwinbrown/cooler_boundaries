@@ -1,6 +1,7 @@
 package cbound
 
 import (
+	"math"
 	"fmt"
 	"flag"
 	"strings"
@@ -69,7 +70,7 @@ func ParseLine(line []string, col map[string]int) (GenoSpan, float64, bool, erro
 	ins := math.NaN()
 	ins_str := line[col["log2_insulation_score_100000"]]
 	if ins_str != "" {
-		ins, e := strconv.ParseFloat(ins_str, 64)
+		ins, e = strconv.ParseFloat(ins_str, 64)
 		if e != nil {
 			return h(e)
 		}
