@@ -110,7 +110,7 @@ def get_boundaries_fixed_win(insulation_table, region, window):
 	weak_boundaries = boundaries[~boundaries[f'is_boundary_{window}']]
 	strong_boundaries = boundaries[boundaries[f'is_boundary_{window}']]
 
-	return boundaries, weak_boundaries, strong_boundaries
+	return insul_region, boundaries, weak_boundaries, strong_boundaries
 
 def plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, norm, window, outpre, boundaries, weak_boundaries, strong_boundaries):
 	f, ax = plt.subplots(figsize=(20, 10))
@@ -251,18 +251,22 @@ def main():
 		routpre = outpre + "_" + regionstr
 
 		for window in windows:
-			boundaries, weak_boundaries, strong_boundaries = get_boundaries_fixed_win(insulation_table, region, window)
+			insul_region, boundaries, weak_boundaries, strong_boundaries = get_boundaries_fixed_win(insulation_table, region, window)
 			plot_with_boundaries_fixed_win(insulation_table, region, data, resolution, norm, window, routpre, boundaries, weak_boundaries, strong_boundaries)
+			write_bound(f"{routpre}_{window}_full.txt", insul_region)
 			write_bound(f"{routpre}_{window}_boundaries.txt", boundaries)
 			write_bound(f"{routpre}_{window}_weak_boundaries.txt", weak_boundaries)
 			write_bound(f"{routpre}_{window}_strong_boundaries.txt", strong_boundaries)
 
-	thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu = call_boundaries(insulation_table, windows, make_histkwargs(), outpre)
-	tabulate_boundaries(insulation_table, windows)
-	write_thresh(f"{outpre}_thresholds_li.txt", thresholds_li)
-	write_thresh(f"{outpre}_thresholds_otsu.txt", thresholds_otsu)
-	write_nbound(f"{outpre}_n_boundaries_li.txt", n_boundaries_li)
-	write_nbound(f"{outpre}_n_boundaries_otsu.txt", n_boundaries_otsu)
+	try:
+		thresholds_li, thresholds_otsu, n_boundaries_li, n_boundaries_otsu = call_boundaries(insulation_table, windows, make_histkwargs(), outpre)
+		tabulate_boundaries(insulation_table, windows)
+		write_thresh(f"{outpre}_thresholds_li.txt", thresholds_li)
+		write_thresh(f"{outpre}_thresholds_otsu.txt", thresholds_otsu)
+		write_nbound(f"{outpre}_n_boundaries_li.txt", n_boundaries_li)
+		write_nbound(f"{outpre}_n_boundaries_otsu.txt", n_boundaries_otsu)
+	except IndexError:
+		sys.stderr.write("IndexError\n")
 
 if __name__ == "__main__":
 	main()
